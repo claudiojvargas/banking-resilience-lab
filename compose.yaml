@@ -1,0 +1,53 @@
+name: bank-lab
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php.Dockerfile
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  web:
+    image: nginx:1.28.3-alpine
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:80"
+    volumes:
+      - ./public:/app/public:ro
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+
+  db:
+    image: postgres:17.12-bookworm
+    environment:
+      POSTGRES_DB: bank_lab
+      POSTGRES_USER: bank_lab
+      POSTGRES_PASSWORD: bank_lab_local
+    volumes:
+      - experiments:/var/lib/postgresql/data
+    healthcheck: &postgres-healthcheck
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  db-test:
+    image: postgres:17.12-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_DB: bank_lab_test
+      POSTGRES_USER: bank_lab_test
+      POSTGRES_PASSWORD: bank_lab_test_local
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck: *postgres-healthcheck
+
+volumes:
+  experiments:
