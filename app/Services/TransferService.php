@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\DebitInterrupted;
 use App\Models\Account;
 use App\Models\Transfer;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -35,15 +36,23 @@ class TransferService
             throw ValidationException::withMessages(['amount_cents' => 'Saldo insuficiente na conta de origem.']);
         }
 
-        // A sequência fica intencionalmente sem transação, locks ou compensação para o exercício.
-        $transfer = Transfer::create([
-            'source_account_id' => $source->id,
-            'destination_account_id' => $destination->id,
-            'amount_cents' => $amount,
-            'status' => 'pending',
-        ]);
+        $runId = (string) Str::uuid();
 
-        $context = ['transfer_uuid' => $transfer->id, 'run_id' => (string) Str::uuid()];
+        $transfer = DB::transaction(function () use ($source, $destination, $amount, $failAfterDebit, $runId): Transfer {
+            $transfer = Transfer::create([
+                'source_account_id' => $source->id,
+                'destination_account_id' => $destination->id,
+                'amount_cents' => $amount,
+                'status' => 'pending',
+            ]);
+
+
+
+        $context = [
+            'transfer_uuid' => $transfer->id, 
+            'run_id' => (string) Str::uuid()
+        ];
+
         Log::info('Transferência', $context + ['stage' => 'pending']);
 
         $source->balance_cents -= $amount;
@@ -61,6 +70,15 @@ class TransferService
 
         $transfer->update(['status' => 'completed']);
         Log::info('Transferência', $context + ['stage' => 'completed']);
+
+        return $transfer;
+        });
+
+        Log::info('Transferência concluída', [
+            'transfer_uuid' => $transfer->id, 
+            'run_id' => $runId,
+            'stage' => 'completed'
+        ]);
 
         return $transfer;
     }
